@@ -36,9 +36,8 @@ def merge_translated_csv_into_txt(
                     line["text"], next_csv_line["trans"], next_csv_line["text"]
                 )
                 replacements.append({
-                    "old": line['text'],
-                    "new": new_text,
-                    "pattern": "text",
+                    "old": f"text={line['text']}",
+                    "new": f"text={new_text}",
                     "length": len(line['text'])
                 })
         elif line["__tag__"] == "title":
@@ -48,9 +47,8 @@ def merge_translated_csv_into_txt(
                     line["title"], next_csv_line["trans"], next_csv_line["text"]
                 )
                 replacements.append({
-                    "old": line['title'],
-                    "new": new_text,
-                    "pattern": "title",
+                    "old": f"title={line['title']}",
+                    "new": f"title={new_text}",
                     "length": len(line['title'])
                 })
         elif line["__tag__"] == "choicegroup":
@@ -64,9 +62,8 @@ def merge_translated_csv_into_txt(
                         is_choice=True,
                     )
                     replacements.append({
-                        "old": choice['text'],
-                        "new": new_text,
-                        "pattern": "text",
+                        "old": f"text={choice['text']}",
+                        "new": f"text={new_text}",
                         "length": len(choice['text'])
                     })
             elif isinstance(line["choices"], dict):
@@ -78,40 +75,65 @@ def merge_translated_csv_into_txt(
                     is_choice=True,
                 )
                 replacements.append({
-                    "old": line["choices"]["text"],
-                    "new": new_text,
-                    "pattern": "text",
+                    "old": f'text={line["choices"]["text"]}',
+                    "new": f"text={new_text}",
                     "length": len(line["choices"]["text"])
                 })
     
     # 按文本长度从长到短排序，避免短相似文本优先匹配的问题
     replacements.sort(key=lambda x: x["length"], reverse=True)
     
-    # 执行替换 - 使用正则表达式进行更精确的匹配
+    # 执行替换
+    # 为避免子串匹配问题（如 text=………… 匹配到 text=……………的前半部分）
+    # 需要确保匹配的是完整的属性值，即后面跟的是分隔符而不是属性值的一部分
     for replacement in replacements:
-        old_text = replacement["old"]
-        new_text = replacement["new"]
-        pattern_name = replacement["pattern"]
+        old_str = replacement["old"]
+        new_str = replacement["new"]
         
-        # 转义正则表达式特殊字符
-        escaped_old = re.escape(old_text)
+        # 找到第一次出现的位置
+        pos = gakuen_txt.find(old_str)
+        if pos == -1:
+            continue  # 未找到，跳过
+            
+        # 检查后面的字符是否为分隔符
+        # 属性值后面通常是: 空格 ' '、右括号 ']'、右尖括号 '>'、换行 '\n'
+        end_pos = pos + len(old_str)
+        if end_pos < len(gakuen_txt):
+            next_char = gakuen_txt[end_pos]
+            # 如果后面不是分隔符，说明是部分匹配，需要继续查找
+            if next_char not in [' ', ']', '>', '\n']:
+                # 寻找下一个完整匹配
+                found = False
+                search_start = pos + 1
+                while True:
+                    pos = gakuen_txt.find(old_str, search_start)
+                    if pos == -1:
+                        break
+                    end_pos = pos + len(old_str)
+                    if end_pos >= len(gakuen_txt):
+                        found = True
+                        break
+                    next_char = gakuen_txt[end_pos]
+                    if next_char in [' ', ']', '>', '\n']:
+                        found = True
+                        break
+                    search_start = pos + 1
+                
+                if not found:
+                    continue  # 没找到完整匹配，跳过
         
-        # 匹配完整的属性，确保只替换一次
-        regex_pattern = f'{pattern_name}={escaped_old}(?=[\\s\\]])'
-        regex_replacement = f'{pattern_name}={new_text}'
-        
-        gakuen_txt = re.sub(regex_pattern, regex_replacement, gakuen_txt, count=1)
+        # 执行替换
+        gakuen_txt = gakuen_txt[:pos] + new_str + gakuen_txt[end_pos:]
     
     # 使用人名字典替换人名
     if name_dict:
         # 按人名长度从长到短排序，避免短人名优先匹配的问题
         sorted_names = sorted(name_dict.items(), key=lambda x: len(x[0]), reverse=True)
         for jp_name, cn_name in sorted_names:
-            # 使用正则表达式匹配 name=日文名，确保是完整的属性值
-            escaped_name = re.escape(jp_name)
-            pattern = f'name={escaped_name}(?=[\\s\\]])'
-            replacement = f'name={cn_name}'
-            gakuen_txt = re.sub(pattern, replacement, gakuen_txt)
+            # 匹配 name=日文名 的模式
+            pattern = f"name={jp_name}"
+            replacement = f"name={cn_name}"
+            gakuen_txt = gakuen_txt.replace(pattern, replacement)
     
     return gakuen_txt
 
